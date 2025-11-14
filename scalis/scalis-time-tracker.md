@@ -2948,7 +2948,11 @@ Thursday November 13th
         - then create AI agent
 - Meeting with ISC
     - Took lots of roadmap notes
-
+- Posted job on LinkedIn
+- Started working on requiring Google Auth for workspaces
+    - Idea is that a user will be able to login with any authentication method but we will gate certain workspaces that require google auth
+    - Step 1 will be to simply have a UI gate
+    - Step 2 will be to gate endpoints as well
 
 
 
@@ -2956,7 +2960,6 @@ Thursday November 13th
 
 TODO:
 - Reject Quan Pham
-- Message in channel to get everyone to do Cern background check
 - Look into setting up Dependabot like Andrei suggested
 - Disconnect zoom modal doesn’t disappear
 - Look into why email unsubscriptions are not working
