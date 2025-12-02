@@ -1,0 +1,10 @@
+{
+  "name": "notes",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "linear:report": "bun scripts/generate-linear-daily-report.ts",
+    "linear:report:console": "bun scripts/generate-linear-daily-report.ts --no-file"
+  }
+}
+
