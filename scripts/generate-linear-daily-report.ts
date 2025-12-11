@@ -28,6 +28,7 @@ interface LinearIssue {
   id: string
   identifier: string
   title: string
+  description?: string
   url: string
   state: {
     name: string
@@ -145,6 +146,7 @@ async function getUpdatedIssues(userId: string, days: number): Promise<LinearIss
           id
           identifier
           title
+          description
           url
           state {
             name
@@ -172,12 +174,10 @@ async function getUpdatedIssues(userId: string, days: number): Promise<LinearIss
 }
 
 /**
- * Get comments made by the user in the past N days
+ * Get comments made by the user since a specific date
  */
-async function getComments(userId: string, days: number): Promise<LinearComment[]> {
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  const sinceISO = since.toISOString()
+async function getComments(userId: string, sinceDate: Date): Promise<LinearComment[]> {
+  const sinceISO = sinceDate.toISOString()
 
   const query = `
     query($since: DateTimeOrDuration!) {
@@ -219,10 +219,8 @@ async function getComments(userId: string, days: number): Promise<LinearComment[
  * Get all issues the user has been active on (only issues with comments or newly assigned)
  * This filters out issues where only priority or other metadata was changed
  */
-async function getActiveIssues(userId: string, days: number): Promise<LinearIssue[]> {
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  const sinceISO = since.toISOString()
+async function getActiveIssues(userId: string, sinceDate: Date): Promise<LinearIssue[]> {
+  const sinceISO = sinceDate.toISOString()
 
   // Only get issues that have comments from the user in the time period
   // This filters out issues where only priority or metadata was changed
@@ -240,6 +238,7 @@ async function getActiveIssues(userId: string, days: number): Promise<LinearIssu
             id
             identifier
             title
+            description
             url
             state {
               name
@@ -272,6 +271,7 @@ async function getActiveIssues(userId: string, days: number): Promise<LinearIssu
           id
           identifier
           title
+          description
           url
           state {
             name
@@ -330,7 +330,7 @@ function formatReport(
   user: LinearUser,
   issues: LinearIssue[],
   comments: LinearComment[],
-  days: number
+  sinceDate: Date
 ): string {
   const date = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -339,9 +339,18 @@ function formatReport(
     day: 'numeric',
   })
 
+  const sinceDateStr = sinceDate.toLocaleString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
   let report = `# Linear Daily Report - ${date}\n\n`
   report += `Generated for: **${user.name}** (${user.email})\n`
-  report += `Time period: Past ${days} day${days !== 1 ? 's' : ''}\n\n`
+  report += `Time period: Since ${sinceDateStr}\n\n`
   report += '---\n\n'
 
   // Group comments by issue ID
@@ -379,6 +388,24 @@ function formatReport(
       for (const issue of stateIssues) {
         report += `- **${issue.identifier}** ${issue.title}\n`
         
+        // Include description if available
+        if (issue.description) {
+          const cleanDescription = issue.description
+            .replace(/```[\s\S]*?```/g, '[code block]')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/\*\*([^*]+)\*\*/g, '$1')
+            .replace(/\*([^*]+)\*/g, '$1')
+            .trim()
+
+          if (cleanDescription) {
+            // Split by newlines and format as indented bullet points
+            const lines = cleanDescription.split('\n').filter((line) => line.trim())
+            lines.forEach((line) => {
+              report += `  - ${line.trim()}\n`
+            })
+          }
+        }
+        
         // Include comments for this issue if any
         const issueComments = commentsByIssueId.get(issue.id)
         if (issueComments && issueComments.length > 0) {
@@ -415,13 +442,12 @@ function formatReport(
 }
 
 /**
- * Generate a date-based filename
+ * Generate a date-based filename from a given date
  */
-function generateDateFilename(): string {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
+function generateDateFilename(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
   return `scalis/daily/my-daily-${year}-${month}-${day}.md`
 }
 
@@ -432,6 +458,7 @@ async function main() {
   const args = process.argv.slice(2)
   let days = 1
   let outputPath: string | null = null
+  let sinceDate: Date | null = null
 
   // Parse arguments
   for (let i = 0; i < args.length; i++) {
@@ -439,6 +466,16 @@ async function main() {
       days = parseInt(args[i + 1], 10)
       if (isNaN(days) || days < 1) {
         console.error('❌ --days must be a positive number')
+        process.exit(1)
+      }
+      i++
+    } else if (args[i] === '--since' && args[i + 1]) {
+      // Parse date string (supports ISO format or YYYY-MM-DDTHH:mm:ss)
+      const dateStr = args[i + 1]
+      sinceDate = new Date(dateStr)
+      if (isNaN(sinceDate.getTime())) {
+        console.error(`❌ Invalid date format: ${dateStr}`)
+        console.error('   Use ISO format: 2025-12-01T08:00:00 or 2025-12-01T08:00:00-05:00')
         process.exit(1)
       }
       i++
@@ -451,6 +488,8 @@ Usage: bun scripts/generate-linear-daily-report.ts [options]
 
 Options:
   --days <number>    Number of days to look back (default: 1)
+  --since <datetime> Start time in ISO format (e.g., 2025-12-01T08:00:00)
+                     Overrides --days if specified
   --output <path>    Save report to file (default: scalis/daily/my-daily-YYYY-MM-DD.md)
   --no-file          Print to console instead of saving to file
   --help, -h         Show this help message
@@ -462,6 +501,8 @@ Environment Variables:
 Examples:
   bun scripts/generate-linear-daily-report.ts
   bun scripts/generate-linear-daily-report.ts --days 7
+  bun scripts/generate-linear-daily-report.ts --since 2025-12-01T08:00:00
+  bun scripts/generate-linear-daily-report.ts --since "2025-12-01T08:00:00-05:00"
   bun scripts/generate-linear-daily-report.ts --output custom-report.md
   bun scripts/generate-linear-daily-report.ts --no-file
       `)
@@ -471,9 +512,10 @@ Examples:
     }
   }
 
-  // Default to date-based filename if no output specified and not --no-file
-  if (outputPath === null && !args.includes('--no-file')) {
-    outputPath = generateDateFilename()
+  // Calculate sinceDate if not provided
+  if (!sinceDate) {
+    sinceDate = new Date()
+    sinceDate.setDate(sinceDate.getDate() - days)
   }
 
   console.log('📊 Generating Linear daily report...\n')
@@ -486,20 +528,28 @@ Examples:
 
     // Get comments first
     console.log('💬 Fetching comments...')
-    const comments = await getComments(user.id, days)
+    const comments = await getComments(user.id, sinceDate)
     console.log(`   Found ${comments.length} comment${comments.length !== 1 ? 's' : ''}\n`)
 
     // Get active issues (only those with comments or newly assigned - filters out priority-only changes)
-    console.log(`🔍 Fetching issues from past ${days} day${days !== 1 ? 's' : ''}...`)
-    const issues = await getActiveIssues(user.id, days)
+    const sinceStr = sinceDate.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    console.log(`🔍 Fetching issues since ${sinceStr}...`)
+    const issues = await getActiveIssues(user.id, sinceDate)
     console.log(`   Found ${issues.length} issue${issues.length !== 1 ? 's' : ''} (filtered to exclude priority-only changes)\n`)
 
     // Generate report
-    const report = formatReport(user, issues, comments, days)
+    const report = formatReport(user, issues, comments, sinceDate)
 
-    // Output report - default to date-based filename if not specified
-    if (outputPath === null) {
-      outputPath = generateDateFilename()
+    // Default to date-based filename if no output specified and not --no-file
+    // Use the start date (sinceDate) for the filename
+    if (outputPath === null && !args.includes('--no-file')) {
+      outputPath = generateDateFilename(sinceDate)
     }
 
     if (outputPath) {
